@@ -21,7 +21,7 @@ const withDir = (file) => path.resolve(__dirname, file);
 fs.readFile(withDir('credentials.json'), (err, content) => {
   if (err) return console.log('Error loading client secret file:', err);
   // Authorize a client with credentials, then call the Gmail API.
-  authorize(JSON.parse(content), listNubank);
+  authorize(JSON.parse(content), listFaturaNet);
 });
 
 /**
@@ -37,16 +37,17 @@ function authorize(credentials, callback) {
     client_id, client_secret, redirect_uris[0]);
 
   // Check if we have previously stored a token.
-  fs.readFile(TOKEN_PATH, (err, token) => {
+  fs.readFile(TOKEN_PATH, async (err, token) => {
     if (err) return getNewToken(oAuth2Client, callback);
     oAuth2Client.setCredentials(JSON.parse(token));
-    oAuth2Client.getAccessToken()
-      .then(() => callback(oAuth2Client))
-      .catch(() => {
-        fs.rm(TOKEN_PATH, () => {
-          getNewToken(oAuth2Client, callback)
-        });
+    try {
+      await oAuth2Client.getAccessToken();
+    } catch (e) {
+      fs.rm(TOKEN_PATH, () => {
+        getNewToken(oAuth2Client, callback)
       });
+    }
+    callback(oAuth2Client);
   });
 }
 
@@ -220,54 +221,57 @@ async function listNubank(auth) {
   const { data: { messages } } = await gmail.users.messages.list({
     userId: 'me',
     q: 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m',
+
   });
+
+
 
   if (messages.length) {
     console.log('Messages', messages);
-    const pdfs = await Promise.all(messages.map(async message => {
-      try {
-        const { data } = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-        });
-        const { payload } = data;
-        const attachment = payload.parts.find((part) => part.filename.includes('.pdf'));
-        const pdfData = await gmail.users.messages.attachments.get({
-          id: attachment.body.attachmentId,
-          messageId: message.id,
-          userId: 'me',
-        });
-        const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
-        // console.log('await extractImgFromPdf(pdfBuffer);');
-
-        return pdfBuffer;
-      } catch (e) {
-        console.log('fail in', e);
+    const messageData = await Promise.all(messages.map((message) => gmail.users.messages.get({
+      userId: 'me',
+      id: message.id,
+    })));
+    const currentEmail = messageData.reduce((
+      prev, current,
+    ) => {
+      if (!prev) {
+        return current;
       }
-    }));
-
-    try {
-      images = await extractImgFromPdf(pdfBuffer);
-    } catch(e) {
-      console.log('fail extractTextFromImg');
+      if (prev.data.internalDate > current.data.internalDate) {
+        return prev;
+      }
+      return current;
+    }, null);
+    if (!currentEmail) {
+      return;
     }
-    try {
-      const texts = await extractTextFromImg(images);
-      texts.map((text) => {
-        // const codeIndex = pdfText.indexOf('033- 7');
-        // const codigoDeBarras = pdfText[codeIndex - 9];
-        // const vencimento = pdfText[codeIndex - 8];
-        // const valor = pdfText[codeIndex + 4];
-        // console.log(
-        //   codigoDeBarras,
-        //   vencimento,
-        //   valor,
-        // );
-        console.log(text);
-      });
-    } catch (e) {
+    const attachment = currentEmail.data.payload.parts.find((part) => part.filename.includes('.pdf'));
+    const pdfData = await gmail.users.messages.attachments.get({
+      id: attachment.body.attachmentId,
+      messageId: currentEmail.data.id,
+      userId: 'me',
+    });
+    const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
+    const images = await extractImgFromPdf(pdfBuffer);
+    const lastImage = images[images.length - 1];
+    const pdfText = await extractTextFromImg(lastImage);
+    const textLines = pdfText.split('\n');
+    const codeMatch = 'NV 260-7 ';
+    const codeIndex = textLines.findIndex((t) => t.includes(codeMatch));
+    const codigoDeBarras = textLines[codeIndex].replace(codeMatch, '');
+    const vencimentoMatch = 'Em qualquer banco até o vencimento ';
+    const vencimentoIndex = textLines.findIndex((t) => t.includes(vencimentoMatch));
+    const vencimento = textLines[vencimentoIndex].replace(vencimentoMatch, '');
+    const valorMatch = '00 R$ ';
+    const valorIndex = textLines.findIndex((t) => t.includes(valorMatch));
+    const valor = textLines[valorIndex].replace(valorMatch, '');
 
-    }
+    console.log(
+      codigoDeBarras,
+      vencimento,
+      valor,
+    );
   } else {
     console.log('No messages.');
   }
