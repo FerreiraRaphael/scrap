@@ -5,3 +5,4 @@
 *.txt
 credentials.json
 token.json
+eng.traineddata
