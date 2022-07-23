@@ -1,0 +1,32 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgres"
+  url      = env("DATABASE_URL")
+}
+
+enum Tipo {
+  NUBANK
+  ALUGUEL
+  NET
+  COND
+  ENERGIA
+  C6
+}
+
+model Boleto {
+  id           Int      @id @default(autoincrement())
+  codigoBarras String
+  vencimento   DateTime
+  valor        Float
+  meta         Json
+  tipo         Tipo
+  sendAt       DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}

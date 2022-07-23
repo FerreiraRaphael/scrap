@@ -1,97 +1,20 @@
-const fs = require('fs');
-const readline = require('readline');
-const path = require('path');
-const { google } = require('googleapis');
-const { download } = require('./download');
-const { extractPdfText } = require('./extractPdfText');
-const { extractImgFromPdf } = require('./extractImgFromPdf');
-const { extractTextFromImg } = require('./extractTextFromImg');
-
-// If modifying these scopes, delete token.json.
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
-// The file token.json stores the user's access and refresh tokens, and is
-// created automatically when the authorization flow completes for the first
-// time.
-const TOKEN_PATH = 'token.json';
-
-const withDir = (file) => path.resolve(__dirname, file);
-
-// Load client secrets from a local file.
-fs.readFile(withDir('credentials.json'), (err, content) => {
-  if (err) return console.log('Error loading client secret file:', err);
-  // Authorize a client with credentials, then call the Gmail API.
-  authorize(JSON.parse(content), listC6);
-});
-
-/**
- * Create an OAuth2 client with the given credentials, and then execute the
- * given callback function.
- * @param {Object} credentials The authorization client credentials.
- * @param {function} callback The callback to call with the authorized client.
- */
-function authorize(credentials, callback) {
-  console.log({ credentials })
-  const { client_secret, client_id, redirect_uris } = credentials.web;
-  const oAuth2Client = new google.auth.OAuth2(
-    client_id, client_secret, redirect_uris[0]);
-
-  // Check if we have previously stored a token.
-  fs.readFile(TOKEN_PATH, async (err, token) => {
-    if (err) return getNewToken(oAuth2Client, callback);
-    oAuth2Client.setCredentials(JSON.parse(token));
-    try {
-      await oAuth2Client.getAccessToken();
-    } catch (e) {
-      fs.rm(TOKEN_PATH, () => {
-        getNewToken(oAuth2Client, callback)
-      });
-    }
-    callback(oAuth2Client);
-  });
-}
-
-/**
- * Get and store new token after prompting for user authorization, and then
- * execute the given callback with the authorized OAuth2 client.
- * @param {google.auth.OAuth2} oAuth2Client The OAuth2 client to get token for.
- * @param {getEventsCallback} callback The callback for the authorized client.
- */
-function getNewToken(oAuth2Client, callback) {
-  console.log('here');
-  const authUrl = oAuth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-  });
-  console.log('Authorize this app by visiting this url:', authUrl);
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  rl.question('Enter the code from that page here: ', (code) => {
-    rl.close();
-    oAuth2Client.getToken(code, (err, token) => {
-      if (err) return console.error('Error retrieving access token', err);
-      oAuth2Client.setCredentials(token);
-      // Store the token to disk for later program executions
-      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
-        if (err) { return console.error('Error here?', err) };
-        console.log('Token stored to', TOKEN_PATH);
-      });
-      callback(oAuth2Client);
-    });
-  });
-}
-
+import fs from 'fs';
+import { gmail_v1, google } from 'googleapis';
+import { download } from '../pdf/download';
+import { extractPdfText } from '../pdf/extractPdfText';
+import { extractImgFromPdf } from '../pdf/extractImgFromPdf';
+import { extractTextFromImg } from '../pdf/extractTextFromImg';
+import { OAuth2Client } from 'google-auth-library';
 
 /**
  * Look for net fatura email.
  * @param {*} auth
  */
-async function listFaturaNet(auth) {
+export async function listFaturaNet(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail newer_than:1m');
   // dia 29 a 28 talvez rodar primeiro dia do mês.
-  if (!messages.length === 0) {
+  if (messages.length !== 0) {
     console.warn('listFaturaNet no messages')
     return;
   }
@@ -123,14 +46,14 @@ async function listFaturaNet(auth) {
  */
 //financeiro2@santailha.com.br
 // começa dia 1-3 e vai até dia 7-9... complexo, tal
-async function listAluguel(auth) {
+export async function listAluguel(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const { data: { messages } } = await gmail.users.messages.list({
     userId: 'me',
     q: 'from:financeiro2@santailha.com.br subject:Seu Boleto de Aluguel newer_than:1m',
   });
 
-  if (messages.length) {
+  if (messages?.length) {
     console.log('Messages', messages);
     // res.data.messages.forEach((message) => {
     await Promise.all(messages.map(async message => {
@@ -140,10 +63,14 @@ async function listAluguel(auth) {
           id: message.id,
         });
         const { payload } = data;
-        const content = Buffer.from(payload.parts[1].body.data, 'base64').toString('utf-8');
+        const contentData = payload?.parts?.at(1)?.body?.data;
+        if (!contentData) {
+          return;
+        }
+        const content = Buffer.from(contentData, 'base64').toString('utf-8');
         const contentWithoutBreaks = content.replace(/(\r\n|\n|\r)/gm, "");
         const urls = contentWithoutBreaks.match(/(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/g);
-        const pdfUrl = urls.find((url) => url.includes('https://adm000260.superlogica.net/clients/areadocliente/publico/cobranca/'));
+        const pdfUrl = (urls || []).find((url) => url.includes('https://adm000260.superlogica.net/clients/areadocliente/publico/cobranca/'));
         if (!pdfUrl) return;
         const buffer = await download(pdfUrl);
         const pdfText = await extractPdfText(buffer);
@@ -166,17 +93,17 @@ async function listAluguel(auth) {
 }
 
 // from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO
-async function listCond(auth) {
+export async function listCond(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO newer_than:6m');
-  if (!messages.length === 0) {
+  if (messages.length !== 0) {
     console.warn('listCond no messages')
     return;
   }
   await Promise.all(messages.map(async message => {
     try {
       const pdfBuffer = await getEmailPdf(gmail, message);
-      const pdfText = await extractPdfText(pdfBuffer, '003');
+      const pdfText = await extractPdfText(pdfBuffer!, '003');
       const parser = '033- 7';
       const info = parseInfoFromText(pdfText, [{
         parser,
@@ -199,16 +126,16 @@ async function listCond(auth) {
 }
 
 // from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada
-async function listNubank(auth) {
+export async function listNubank(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m');
-  if (!messages.length === 0) {
+  if (messages.length !== 0) {
     console.warn('listNubank no messages')
     return;
   }
-  const currentMessage = getNewestMessage(messages);
+  const currentMessage = (getNewestMessage(messages))!;
   const pdfData = await getEmailPdf(gmail, currentMessage);
-  const images = await extractImgFromPdf(pdfData);
+  const images = await extractImgFromPdf(pdfData!);
   const lastImage = images[images.length - 1];
   const pdfText = await extractTextFromImg(lastImage);
   const textLines = pdfText.split('\n');
@@ -235,16 +162,16 @@ async function listNubank(auth) {
  *
  * @param {import('googleapis').oauth2_v1.Oauth2} auth
  */
-async function listEnergia(auth) {
+export async function listEnergia(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica newer_than:6m');
-  if (!messages.length === 0) {
+  if (messages.length !== 0) {
     console.warn('listEnergia no messages')
     return;
   }
   await Promise.all(messages.map(async (message) => {
     const pdfBuffer = await getEmailPdf(gmail, message);
-    const pdfText = await extractPdfText(pdfBuffer);
+    const pdfText = await extractPdfText(pdfBuffer!);
     const info = parseInfoFromText(pdfText, [{
       parser: 'VENCIMENTO',
       fieldName: 'vencimento',
@@ -263,20 +190,16 @@ async function listEnergia(auth) {
   }));
 }
 
-/**
- *
- * @param {import('googleapis').oauth2_v1.Oauth2} auth
- */
- async function listC6(auth) {
+export async function listC6(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:no-reply@c6.com.br subject:Sua fatura do C6 Bank chegou newer_than:6m ');
-  if (!messages.length === 0) {
+  if (messages.length !== 0) {
     console.warn('listC6 no messages')
     return;
   }
   await Promise.all(messages.map(async (message) => {
     const pdfBuffer = await getEmailPdf(gmail, message);
-    const pdfText = await extractPdfText(pdfBuffer, '012108');
+    const pdfText = await extractPdfText(pdfBuffer!, '012108');
     fs.writeFileSync(new Date().toISOString(), pdfText.join('\n'));
     const info = parseInfoFromText(pdfText, [{
       parser: 'VENCIMENTO',
@@ -295,7 +218,14 @@ async function listEnergia(auth) {
   }));
 }
 
-function parseInfoFromText(text, parsers) {
+interface IParsers {
+  parser: string | ((t: string) => boolean);
+  replaces?: [string, string][];
+  fieldName: string;
+  indexIncrement?: number;
+}
+
+function parseInfoFromText(text: string[], parsers: IParsers[]) {
   return parsers.map(({
     parser,
     replaces = [],
@@ -316,12 +246,12 @@ function parseInfoFromText(text, parsers) {
     return { [fieldName]: newValue };
   }).reduce((prev, current) => ({ ...prev, ...current }), {});
 }
-/**
- * @param {import('googleapis').gmail_v1.Gmail} gmail
- * @param {string} query
- * @return {Promise<import('googleapis').gmail_v1.Schema$Message[]>}
- */
-async function getEmails(gmail, query) {
+
+function isNotUndefined<T>(item: T | undefined): item is T {
+  return Boolean(item);
+}
+
+async function getEmails(gmail: gmail_v1.Gmail, query: string) {
   const { data: { messages } } = await gmail.users.messages.list({
     userId: 'me',
     q: query,
@@ -339,82 +269,72 @@ async function getEmails(gmail, query) {
         console.error('fail getEmails', e);
       }
     }));
-    return messageData.filter(Boolean);
+    return messageData.filter(isNotUndefined);
   } else {
     console.debug('No messages.');
     return [];
   }
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Gmail} gmail
- * @param {import('googleapis').gmail_v1.Schema$Message} message
- */
-async function getEmailPdf(gmail, message) {
+async function getEmailPdf(gmail: gmail_v1.Gmail, message: gmail_v1.Schema$Message) {
   const attachment = findPdfAttachment(message);
   const pdfData = await gmail.users.messages.attachments.get({
-    id: attachment.body.attachmentId,
+    id: attachment?.body?.attachmentId,
     messageId: message.id,
     userId: 'me',
   });
-  const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
+  const data = pdfData?.data?.data;
+  if (!data) {
+    return;
+  }
+  const pdfBuffer = Buffer.from(data, 'base64');
   return pdfBuffer;
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$MessagePart} attachment
- */
-function attachmentToBuffer(attachment) {
-  return Buffer.from(attachment.body.data, 'base64');
+function attachmentToBuffer(attachment?: gmail_v1.Schema$MessagePartBody) {
+  const data = attachment?.data;
+  if (!data) {
+    return;
+  }
+  return Buffer.from(data, 'base64');
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$MessagePart} attachment
- */
-function isPdfAttachment(attachment) {
-  return attachment.filename.includes('.pdf');
+function isPdfAttachment(attachment: gmail_v1.Schema$MessagePart) {
+  return !!attachment?.filename?.includes('.pdf');
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$Message} message
- */
-function findPdfAttachment(message) {
-  return message.payload.parts.find(isPdfAttachment);
+function findPdfAttachment(message: gmail_v1.Schema$Message) {
+  return message?.payload?.parts?.find(isPdfAttachment);
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$Message[]} messages
- */
-function getNewestMessage(messages) {
+function getNewestMessage(messages: gmail_v1.Schema$Message[]) {
   return messages.reduce((
     prev, current,
   ) => {
     if (!prev) {
       return current;
     }
-    if (prev.internalDate > current.internalDate) {
+    if ((prev?.internalDate || 0) > (current?.internalDate || 0)) {
       return prev;
     }
     return current;
-  }, null);
+  }, null as gmail_v1.Schema$Message | null);
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$Message} message
- */
-function getHtmlContent(message) {
+function getHtmlContent(message: gmail_v1.Schema$Message) {
   const htmlAttachment = getHtmlAttachment(message);
   if (!htmlAttachment) {
     return [];
   }
-  const htmlText = Buffer.from(htmlAttachment.body.data, 'base64').toString('ascii');
+  const data = htmlAttachment?.body?.data;
+  if (!data) {
+    return [];
+  }
+  const htmlText = Buffer.from(data, 'base64').toString('ascii');
   const htmlLines = htmlText.split(/(\r\n|\n|\r)/gm).map(t => t.trim()).filter(Boolean);
   return htmlLines;
 }
 
-/**
- * @param {import('googleapis').gmail_v1.Schema$Message} message
- */
-function getHtmlAttachment(message) {
-  return message.payload.parts.find((p) => p.mimeType === 'text/html');
+function getHtmlAttachment(message: gmail_v1.Schema$Message) {
+  return message?.payload?.parts?.find((p) => p.mimeType === 'text/html');
 }

@@ -1,23 +1,14 @@
-const fs = require('fs');
-const { PNG } = require('pngjs');
-const pako = require('pako');
+// @ts-nocheck
+import { PNG } from 'pngjs';
+import pako  from 'pako';
 const { PDFDocumentFactory, PDFName, PDFRawStream } = require('pdf-lib');
 
-// Load the existing PDF
-// const [, , originalPdfPath] = process.argv;
-
-function toArrayBuffer(buf) {
-  const ab = new ArrayBuffer(buf.length);
-  const view = new Uint8Array(ab);
-  for (let i = 0; i < buf.length; ++i) {
-      view[i] = buf[i];
-  }
-  return ab;
-}
-async function extractImgFromPdf(originalPdfPath) {
+// // Load the existing PDF
+export async function extractImgFromPdf(originalPdfPath: string | Buffer): Buffer[] {
   const pdfDoc = PDFDocumentFactory.load(originalPdfPath);
 
   // Define some variables we'll use in a moment
+
   const imagesInDoc = [];
   let objectIdx = 0;
 
@@ -72,33 +63,6 @@ async function extractImgFromPdf(originalPdfPath) {
   imagesInDoc.forEach(image => {
     page.addImageObject(image.name, image.ref);
   });
-
-  // Log info about the images we found in the PDF
-  // console.log('===== Images in PDF =====');
-  // imagesInDoc.forEach(image => {
-  //   console.log(
-  //     'Name:',
-  //     image.name,
-  //     '\n  Type:',
-  //     image.type,
-  //     '\n  Color Space:',
-  //     image.colorSpace.toString(),
-  //     '\n  Has Alpha Layer?',
-  //     image.alphaLayer ? true : false,
-  //     '\n  Is Alpha Layer?',
-  //     image.isAlphaLayer || false,
-  //     '\n  Width:',
-  //     image.width,
-  //     '\n  Height:',
-  //     image.height,
-  //     '\n  Bits Per Component:',
-  //     image.bitsPerComponent,
-  //     '\n  Data:',
-  //     `Uint8Array(${image.data.length})`,
-  //     '\n  Ref:',
-  //     image.ref.toString(),
-  //   );
-  // });
 
   const PngColorTypes = {
     Grayscale: 0,
@@ -202,24 +166,12 @@ async function extractImgFromPdf(originalPdfPath) {
         .on('error', err => reject(err));
     });
 
-  // rimraf('./images/*.{jpg,png}', async err => {
-  //   if (err) console.error(err);
-  //   else {
-  // let idx = 0;
   let result = [];
   for (const img of imagesInDoc) {
     if (!img.isAlphaLayer) {
       const imageData = img.type === 'jpg' ? img.data : await savePng(img);
       result.push(imageData);
-      // fs.writeFileSync(`./images/out${idx + 1}.png`, imageData);
-      // idx += 1;
     }
   }
-  // console.log();
-  // console.log('Images written to ./images');
-    // }
-  // });
   return result;
 }
-
-module.exports = { extractImgFromPdf };

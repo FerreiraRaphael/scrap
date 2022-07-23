@@ -1,5 +1,6 @@
-const { createWorker } = require('tesseract.js');
-async function extractTextFromImg(image) {
+import { createWorker, ImageLike } from 'tesseract.js';
+
+export async function extractTextFromImg(image: ImageLike) {
   const worker = createWorker();
   await worker.load();
   await worker.loadLanguage('eng');
@@ -13,4 +14,3 @@ async function extractTextFromImg(image) {
   }
   return text;
 }
-module.exports = { extractTextFromImg };
