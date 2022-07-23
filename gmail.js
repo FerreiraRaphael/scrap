@@ -21,7 +21,7 @@ const withDir = (file) => path.resolve(__dirname, file);
 fs.readFile(withDir('credentials.json'), (err, content) => {
   if (err) return console.log('Error loading client secret file:', err);
   // Authorize a client with credentials, then call the Gmail API.
-  authorize(JSON.parse(content), listFaturaNet);
+  authorize(JSON.parse(content), listCond);
 });
 
 /**
@@ -218,62 +218,168 @@ async function listCond(auth) {
 // from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada
 async function listNubank(auth) {
   const gmail = google.gmail({ version: 'v1', auth });
+  const messages = await getEmails(gmail, 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m');
+  if (!messages.length === 0) {
+    console.warn('listEnergia no messages')
+    return;
+  }
+  const currentMessage = getNewestMessage(messages);
+  const pdfData = await getEmailPdf(gmail, currentMessage);
+  const images = await extractImgFromPdf(pdfData);
+  const lastImage = images[images.length - 1];
+  const pdfText = await extractTextFromImg(lastImage);
+  const textLines = pdfText.split('\n');
+  const codeMatch = 'NV 260-7 ';
+  const vencimentoMatch = 'Em qualquer banco até o vencimento ';
+  const valorMatch = '00 R$ ';
+  const info = parseInfoFromText(textLines, [{
+    parser: (t) => t.includes(codeMatch),
+    replaces: [[codeMatch, '']],
+    fieldName: 'code',
+  }, {
+    parser: (t) => t.includes(vencimentoMatch),
+    replaces: [[vencimentoMatch, '']],
+    fieldName: 'vencimento',
+  }, {
+    parser: (t) => t.includes(valorMatch),
+    replaces: [[valorMatch, '']],
+    fieldName: 'valor',
+  }]);
+  console.log(info);
+}
+
+/**
+ *
+ * @param {import('googleapis').oauth2_v1.Oauth2} auth
+ */
+async function listEnergia(auth) {
+  const gmail = google.gmail({ version: 'v1', auth });
+  const messages = await getEmails(gmail, 'from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica newer_than:6m');
+  if (!messages.length === 0) {
+    console.warn('listEnergia no messages')
+    return;
+  }
+  await Promise.all(messages.map(async (message) => {
+    const pdfBuffer = await getEmailPdf(gmail, message);
+    const pdfText = await extractPdfText(pdfBuffer);
+    const info = parseInfoFromText(pdfText, [{
+      parser: 'VENCIMENTO',
+      fieldName: 'vencimento',
+      indexIncrement: 1,
+    }, {
+      parser: 'VALOR ATÉ O VENCIMENTO',
+      fieldName: 'valor',
+      replaces: [['R$ ', '']],
+      indexIncrement: 1,
+    }, {
+      parser: 'GBCELESC1 (V1.05)',
+      fieldName: 'codigo',
+      indexIncrement: -1,
+    }]);
+    console.log(info);
+  }));
+}
+
+function parseInfoFromText(text, parsers) {
+  return parsers.map(({
+    parser,
+    replaces = [],
+    fieldName,
+    indexIncrement = 0,
+  }) => {
+    let index = -1;
+    if (typeof parser === 'string') {
+      index = text.indexOf(parser);
+    } else {
+      index = text.findIndex(parser);
+    }
+    const value = text[index + indexIncrement];
+    if (!value) {
+      return { [fieldName]: value };
+    }
+    const newValue = replaces.reduce((prev, current) => prev.replace(...current), value);
+    return { [fieldName]: newValue };
+  }).reduce((prev, current) => ({ ...prev, ...current }), {});
+}
+/**
+ * @param {import('googleapis').gmail_v1.Gmail} gmail
+ * @param {string} query
+ * @return {Promise<import('googleapis').gmail_v1.Schema$Message[]>}
+ */
+async function getEmails(gmail, query) {
   const { data: { messages } } = await gmail.users.messages.list({
     userId: 'me',
-    q: 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m',
-
+    q: query,
   });
-
-
-
-  if (messages.length) {
-    console.log('Messages', messages);
-    const messageData = await Promise.all(messages.map((message) => gmail.users.messages.get({
-      userId: 'me',
-      id: message.id,
-    })));
-    const currentEmail = messageData.reduce((
-      prev, current,
-    ) => {
-      if (!prev) {
-        return current;
+  if (messages && messages.length) {
+    console.debug('Messages', messages);
+    const messageData = await Promise.all(messages.map(async message => {
+      try {
+        const messageData = await gmail.users.messages.get({
+          userId: 'me',
+          id: message.id,
+        });
+        return messageData.data
+      } catch (e) {
+        console.error('fail getEmails', e);
       }
-      if (prev.data.internalDate > current.data.internalDate) {
-        return prev;
-      }
-      return current;
-    }, null);
-    if (!currentEmail) {
-      return;
-    }
-    const attachment = currentEmail.data.payload.parts.find((part) => part.filename.includes('.pdf'));
-    const pdfData = await gmail.users.messages.attachments.get({
-      id: attachment.body.attachmentId,
-      messageId: currentEmail.data.id,
-      userId: 'me',
-    });
-    const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
-    const images = await extractImgFromPdf(pdfBuffer);
-    const lastImage = images[images.length - 1];
-    const pdfText = await extractTextFromImg(lastImage);
-    const textLines = pdfText.split('\n');
-    const codeMatch = 'NV 260-7 ';
-    const codeIndex = textLines.findIndex((t) => t.includes(codeMatch));
-    const codigoDeBarras = textLines[codeIndex].replace(codeMatch, '');
-    const vencimentoMatch = 'Em qualquer banco até o vencimento ';
-    const vencimentoIndex = textLines.findIndex((t) => t.includes(vencimentoMatch));
-    const vencimento = textLines[vencimentoIndex].replace(vencimentoMatch, '');
-    const valorMatch = '00 R$ ';
-    const valorIndex = textLines.findIndex((t) => t.includes(valorMatch));
-    const valor = textLines[valorIndex].replace(valorMatch, '');
-
-    console.log(
-      codigoDeBarras,
-      vencimento,
-      valor,
-    );
+    }));
+    return messageData.filter(Boolean);
   } else {
-    console.log('No messages.');
+    console.debug('No messages.');
+    return [];
   }
 }
 
+/**
+ * @param {import('googleapis').gmail_v1.Gmail} gmail
+ * @param {import('googleapis').gmail_v1.Schema$Message} message
+ */
+async function getEmailPdf(gmail, message) {
+  const attachment = findPdfAttachment(message);
+  const pdfData = await gmail.users.messages.attachments.get({
+    id: attachment.body.attachmentId,
+    messageId: message.id,
+    userId: 'me',
+  });
+  const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
+  return pdfBuffer;
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$MessagePart} attachment
+ */
+function attachmentToBuffer(attachment) {
+  return Buffer.from(attachment.body.data, 'base64');
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$MessagePart} attachment
+ */
+function isPdfAttachment(attachment) {
+  return attachment.filename.includes('.pdf');
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$Message} message
+ */
+function findPdfAttachment(message) {
+  return message.payload.parts.find(isPdfAttachment);
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$Message[]} messages
+ */
+function getNewestMessage(messages) {
+  return messages.reduce((
+    prev, current,
+  ) => {
+    if (!prev) {
+      return current;
+    }
+    if (prev.internalDate > current.internalDate) {
+      return prev;
+    }
+    return current;
+  }, null);
+}
