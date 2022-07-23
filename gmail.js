@@ -2,7 +2,6 @@ const fs = require('fs');
 const readline = require('readline');
 const path = require('path');
 const { google } = require('googleapis');
-const { getCodigoCliente, getCodigoBarras, getVencimento, getValorTotal } = require('./reademail');
 const { download } = require('./download');
 const { extractPdfText } = require('./extractPdfText');
 const { extractImgFromPdf } = require('./extractImgFromPdf');
@@ -21,7 +20,7 @@ const withDir = (file) => path.resolve(__dirname, file);
 fs.readFile(withDir('credentials.json'), (err, content) => {
   if (err) return console.log('Error loading client secret file:', err);
   // Authorize a client with credentials, then call the Gmail API.
-  authorize(JSON.parse(content), listCond);
+  authorize(JSON.parse(content), listC6);
 });
 
 /**
@@ -90,42 +89,38 @@ function getNewToken(oAuth2Client, callback) {
  */
 async function listFaturaNet(auth) {
   const gmail = google.gmail({ version: 'v1', auth });
-  const { data: { messages } } = await gmail.users.messages.list({
-    userId: 'me',
-    q: 'from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail newer_than:1m',
-  });
+  const messages = await getEmails(gmail, 'from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail newer_than:1m');
   // dia 29 a 28 talvez rodar primeiro dia do mês.
-
-  if (messages.length) {
-    await Promise.all(messages.map(async (message) => {
-      const { data } = await gmail.users.messages.get({
-        userId: 'me',
-        id: message.id,
-      });
-      const { payload } = data;
-
-      const content = Buffer.from(payload.parts[0].body.data, 'base64').toString('ascii');
-      const contentWithoutBreaks = content.replace(/(\r\n|\n|\r)/gm, "");
-      try {
-        // const myCode = '088/624216460';
-        // const codigoCliente = getCodigoCliente(contentWithoutBreaks);
-        // if (codigoCliente !== myCode) return;
-        console.log(
-          getCodigoCliente(contentWithoutBreaks),
-          getCodigoBarras(contentWithoutBreaks),
-          getVencimento(contentWithoutBreaks),
-          getValorTotal(contentWithoutBreaks),
-          new Date(Number(data.internalDate)),
-        );
-      } catch (e) {
-        console.log(e)
-      }
-    }));
-  } else {
-    console.log('No messages.');
+  if (!messages.length === 0) {
+    console.warn('listFaturaNet no messages')
+    return;
   }
-}
 
+  await Promise.all(messages.map(async (message) => {
+    const htmlLines = getHtmlContent(message);
+    const info = parseInfoFromText(htmlLines, [{
+      parser: 'CC3digo do cliente:<BR>',
+      indexIncrement: 1,
+      fieldName: 'codigoCliente',
+    }, {
+      parser: 'CC3digo de barras:<BR>',
+      indexIncrement: 1,
+      fieldName: 'codigoBarras',
+    }, {
+      parser: 'Vencimento:<BR>',
+      indexIncrement: 1,
+      fieldName: 'vencimento',
+    }, {
+      parser: 'Total a pagar',
+      indexIncrement: 5,
+      fieldName: 'valor',
+    }]);
+    console.log(info);
+  }));
+}
+/**
+ * @TODO: testar com boletos validos no email... e passar para padrao dos parsers
+ */
 //financeiro2@santailha.com.br
 // começa dia 1-3 e vai até dia 7-9... complexo, tal
 async function listAluguel(auth) {
@@ -145,7 +140,6 @@ async function listAluguel(auth) {
           id: message.id,
         });
         const { payload } = data;
-        // debugger;
         const content = Buffer.from(payload.parts[1].body.data, 'base64').toString('utf-8');
         const contentWithoutBreaks = content.replace(/(\r\n|\n|\r)/gm, "");
         const urls = contentWithoutBreaks.match(/(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/g);
@@ -174,45 +168,34 @@ async function listAluguel(auth) {
 // from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO
 async function listCond(auth) {
   const gmail = google.gmail({ version: 'v1', auth });
-  const { data: { messages } } = await gmail.users.messages.list({
-    userId: 'me',
-    q: 'from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO newer_than:6m',
-  });
-
-  if (messages.length) {
-    console.log('Messages', messages);
-    // res.data.messages.forEach((message) => {
-    await Promise.all(messages.map(async message => {
-      try {
-        const { data } = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-        });
-        const { payload } = data;
-        const attachment = payload.parts.find((part) => part.filename.includes('.pdf'));
-        const pdfData = await gmail.users.messages.attachments.get({
-          id: attachment.body.attachmentId,
-          messageId: message.id,
-          userId: 'me',
-        });
-        const pdfBuffer = Buffer.from(pdfData.data.data, 'base64');
-        const pdfText = await extractPdfText(pdfBuffer, '003');
-        const codeIndex = pdfText.indexOf('033- 7');
-        const codigoDeBarras = pdfText[codeIndex - 9];
-        const vencimento = pdfText[codeIndex - 8];
-        const valor = pdfText[codeIndex + 4];
-        console.log(
-          codigoDeBarras,
-          vencimento,
-          valor,
-        );
-      } catch (e) {
-        console.log('fail in', e);
-      }
-    }))
-  } else {
-    console.log('No messages.');
+  const messages = await getEmails(gmail, 'from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO newer_than:6m');
+  if (!messages.length === 0) {
+    console.warn('listCond no messages')
+    return;
   }
+  await Promise.all(messages.map(async message => {
+    try {
+      const pdfBuffer = await getEmailPdf(gmail, message);
+      const pdfText = await extractPdfText(pdfBuffer, '003');
+      const parser = '033- 7';
+      const info = parseInfoFromText(pdfText, [{
+        parser,
+        indexIncrement: -9,
+        fieldName: 'codigoDeBarras',
+      }, {
+        parser,
+        indexIncrement: -8,
+        fieldName: 'vencimento',
+      }, {
+        parser,
+        indexIncrement: 4,
+        fieldName: 'valor',
+      }]);
+      console.log(info);
+    } catch (e) {
+      console.log('fail in', e);
+    }
+  }))
 }
 
 // from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada
@@ -220,7 +203,7 @@ async function listNubank(auth) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m');
   if (!messages.length === 0) {
-    console.warn('listEnergia no messages')
+    console.warn('listNubank no messages')
     return;
   }
   const currentMessage = getNewestMessage(messages);
@@ -275,6 +258,38 @@ async function listEnergia(auth) {
       parser: 'GBCELESC1 (V1.05)',
       fieldName: 'codigo',
       indexIncrement: -1,
+    }]);
+    console.log(info);
+  }));
+}
+
+/**
+ *
+ * @param {import('googleapis').oauth2_v1.Oauth2} auth
+ */
+ async function listC6(auth) {
+  const gmail = google.gmail({ version: 'v1', auth });
+  const messages = await getEmails(gmail, 'from:no-reply@c6.com.br subject:Sua fatura do C6 Bank chegou newer_than:6m ');
+  if (!messages.length === 0) {
+    console.warn('listC6 no messages')
+    return;
+  }
+  await Promise.all(messages.map(async (message) => {
+    const pdfBuffer = await getEmailPdf(gmail, message);
+    const pdfText = await extractPdfText(pdfBuffer, '012108');
+    fs.writeFileSync(new Date().toISOString(), pdfText.join('\n'));
+    const info = parseInfoFromText(pdfText, [{
+      parser: 'VENCIMENTO',
+      fieldName: 'vencimento',
+      indexIncrement: 3,
+    }, {
+      parser: 'VALOR TOTAL',
+      fieldName: 'valor',
+      indexIncrement: 1,
+    }, {
+      parser: '(=) VALOR PAGO',
+      fieldName: 'codigo',
+      indexIncrement: 1,
     }]);
     console.log(info);
   }));
@@ -382,4 +397,24 @@ function getNewestMessage(messages) {
     }
     return current;
   }, null);
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$Message} message
+ */
+function getHtmlContent(message) {
+  const htmlAttachment = getHtmlAttachment(message);
+  if (!htmlAttachment) {
+    return [];
+  }
+  const htmlText = Buffer.from(htmlAttachment.body.data, 'base64').toString('ascii');
+  const htmlLines = htmlText.split(/(\r\n|\n|\r)/gm).map(t => t.trim()).filter(Boolean);
+  return htmlLines;
+}
+
+/**
+ * @param {import('googleapis').gmail_v1.Schema$Message} message
+ */
+function getHtmlAttachment(message) {
+  return message.payload.parts.find((p) => p.mimeType === 'text/html');
 }
