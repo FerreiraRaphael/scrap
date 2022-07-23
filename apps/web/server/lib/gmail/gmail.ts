@@ -5,17 +5,21 @@ import { extractPdfText } from '../pdf/extractPdfText';
 import { extractImgFromPdf } from '../pdf/extractImgFromPdf';
 import { extractTextFromImg } from '../pdf/extractTextFromImg';
 import { OAuth2Client } from 'google-auth-library';
+import { googleOAuth } from '~/server/globals/googleOAuth';
 
 /**
  * Look for net fatura email.
  * @param {*} auth
  */
-export async function listFaturaNet(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
+export async function getBoletoNet() {
+  console.log('aqui');
+  const gmail = google.gmail({ version: 'v1', auth: googleOAuth });
+  console.log('aqui2');
   const messages = await getEmails(gmail, 'from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail newer_than:1m');
+  console.log('aqui3', messages)
   // dia 29 a 28 talvez rodar primeiro dia do mês.
   if (messages.length !== 0) {
-    console.warn('listFaturaNet no messages')
+    console.warn('getBoletoNet no messages')
     return;
   }
 

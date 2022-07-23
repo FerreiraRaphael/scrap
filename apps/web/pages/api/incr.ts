@@ -1,7 +1,5 @@
-import Redis from 'ioredis'
 import { NextApiRequest, NextApiResponse } from 'next'
-
-let redis = new Redis(process.env.REDIS_URL || '6379')
+import { redis } from '~/server/globals/redis'
 
 export default async function handler(
   req: NextApiRequest,

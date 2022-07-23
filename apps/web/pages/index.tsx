@@ -1,13 +1,13 @@
 import { trpc } from "~/client/trpc";
 
 export default function IndexPage() {
-  const hello = trpc.useQuery(['hello', { text: 'client' }]);
+  const hello = trpc.useQuery(['dogFacts.get-random-fact']);
   if (!hello.data) {
     return <div>Loading...</div>;
   }
   return (
     <div>
-      <p>{hello.data.greeting}</p>
+      <p>{JSON.stringify(hello.data.facts)}</p>
     </div>
   );
 };

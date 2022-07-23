@@ -24,11 +24,13 @@
     "ioredis": "^5.2.2",
     "next": "12.2.3",
     "pako": "^2.0.4",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "pngjs": "^6.0.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-query": "^3.39.2",
+    "superjson": "^1.9.1",
     "tesseract.js": "^2.1.5",
     "zod": "^3.17.10"
   },
