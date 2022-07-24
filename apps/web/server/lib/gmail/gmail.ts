@@ -6,24 +6,33 @@ import { extractImgFromPdf } from '../pdf/extractImgFromPdf';
 import { extractTextFromImg } from '../pdf/extractTextFromImg';
 import { OAuth2Client } from 'google-auth-library';
 import { googleOAuth } from '~/server/globals/googleOAuth';
+import { Boleto, Tipo, Prisma } from '@prisma/client';
+import { format } from 'date-fns';
 
-/**
- * Look for net fatura email.
- * @param {*} auth
- */
-export async function getBoletoNet() {
-  console.log('aqui');
-  const gmail = google.gmail({ version: 'v1', auth: googleOAuth });
-  console.log('aqui2');
-  const messages = await getEmails(gmail, 'from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail newer_than:1m');
-  console.log('aqui3', messages)
-  // dia 29 a 28 talvez rodar primeiro dia do mês.
-  if (messages.length !== 0) {
-    console.warn('getBoletoNet no messages')
-    return;
+type IBoletoInfo<
+  T extends Boleto['tipo'],
+  M extends (Object) = {}
+  > = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt'> & {
+    tipo: T;
+    meta: M;
+  };
+type TBoletoNet = IBoletoInfo<'NET', {
+  codigoClient: string
+}>;
+
+const valorReplaces: TParserReplace = [['.', ''], [',', '.']];
+const codigoBarrasReplaces: TParserReplace = [[/\.|\s/g, '']];
+const dateFilter = (date?: Date) => date ? `after:${format(date, 'mm/dd/yyyy')}` : 'newer_than:6m';
+
+export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNet[]> {
+  let messages;
+  try {
+    messages = await getEmails(gmail, `from:faturadigital@minhaclaro.com.br subject:Sua fatura Claro Net por e-mail ${dateFilter(lastDate)}`);
+  } catch (e) {
+    console.log(e);
+    throw e;
   }
-
-  await Promise.all(messages.map(async (message) => {
+  return await Promise.all(messages.map(async (message) => {
     const htmlLines = getHtmlContent(message);
     const info = parseInfoFromText(htmlLines, [{
       parser: 'CC3digo do cliente:<BR>',
@@ -33,6 +42,7 @@ export async function getBoletoNet() {
       parser: 'CC3digo de barras:<BR>',
       indexIncrement: 1,
       fieldName: 'codigoBarras',
+      replaces: codigoBarrasReplaces,
     }, {
       parser: 'Vencimento:<BR>',
       indexIncrement: 1,
@@ -41,8 +51,18 @@ export async function getBoletoNet() {
       parser: 'Total a pagar',
       indexIncrement: 5,
       fieldName: 'valor',
+      replaces: valorReplaces,
     }]);
-    console.log(info);
+    return {
+      codigoBarras: info.codigoBarras,
+      vencimento: new Date(info.vencimento),
+      valor: Number(info.valor),
+      meta: {
+        codigoClient: info.codigoClient,
+      },
+      tipo: Tipo.NET,
+      sendAt: new Date(Number(message.internalDate)),
+    };
   }));
 }
 /**
@@ -59,7 +79,6 @@ export async function listAluguel(auth: OAuth2Client) {
 
   if (messages?.length) {
     console.log('Messages', messages);
-    // res.data.messages.forEach((message) => {
     await Promise.all(messages.map(async message => {
       try {
         const { data } = await gmail.users.messages.get({
@@ -96,15 +115,10 @@ export async function listAluguel(auth: OAuth2Client) {
   }
 }
 
-// from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO
-export async function listCond(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
-  const messages = await getEmails(gmail, 'from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO newer_than:6m');
-  if (messages.length !== 0) {
-    console.warn('listCond no messages')
-    return;
-  }
-  await Promise.all(messages.map(async message => {
+type TBoletoCond = IBoletoInfo<'COND'>;
+export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoCond[]> {
+  const messages = await getEmails(gmail, `from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO ${dateFilter(lastDate)}`);
+  const boletos = await Promise.all(messages.map(async message => {
     try {
       const pdfBuffer = await getEmailPdf(gmail, message);
       const pdfText = await extractPdfText(pdfBuffer!, '003');
@@ -112,7 +126,8 @@ export async function listCond(auth: OAuth2Client) {
       const info = parseInfoFromText(pdfText, [{
         parser,
         indexIncrement: -9,
-        fieldName: 'codigoDeBarras',
+        fieldName: 'codigoBarras',
+        replaces: codigoBarrasReplaces,
       }, {
         parser,
         indexIncrement: -8,
@@ -121,22 +136,32 @@ export async function listCond(auth: OAuth2Client) {
         parser,
         indexIncrement: 4,
         fieldName: 'valor',
+        replaces: valorReplaces,
       }]);
-      console.log(info);
-    } catch (e) {
-      console.log('fail in', e);
+      return {
+        codigoBarras: info.codigoBarras,
+        vencimento: new Date(info.vencimento),
+        valor: Number(info.valor),
+        tipo: Tipo.COND,
+        sendAt: new Date(Number(message.internalDate)),
+        meta: {},
+      };
     }
-  }))
+    catch {
+      return null
+    }
+  }));
+  return boletos.filter(isNotUndefined)
 }
 
-// from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada
-export async function listNubank(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
-  const messages = await getEmails(gmail, 'from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada newer_than:6m');
-  if (messages.length !== 0) {
+type TBoletoNubank = IBoletoInfo<'NUBANK'>;
+export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank | undefined> {
+  const messages = await getEmails(gmail, `from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada ${dateFilter(lastDate)}`);
+  if (messages.length === 0) {
     console.warn('listNubank no messages')
     return;
   }
+  debugger;
   const currentMessage = (getNewestMessage(messages))!;
   const pdfData = await getEmailPdf(gmail, currentMessage);
   const images = await extractImgFromPdf(pdfData!);
@@ -148,18 +173,25 @@ export async function listNubank(auth: OAuth2Client) {
   const valorMatch = '00 R$ ';
   const info = parseInfoFromText(textLines, [{
     parser: (t) => t.includes(codeMatch),
-    replaces: [[codeMatch, '']],
-    fieldName: 'code',
+    replaces: [[codeMatch, ''], ...codigoBarrasReplaces],
+    fieldName: 'codigoBarras',
   }, {
     parser: (t) => t.includes(vencimentoMatch),
     replaces: [[vencimentoMatch, '']],
     fieldName: 'vencimento',
   }, {
     parser: (t) => t.includes(valorMatch),
-    replaces: [[valorMatch, '']],
+    replaces: [[valorMatch, ''], ...valorReplaces],
     fieldName: 'valor',
   }]);
-  console.log(info);
+  return {
+    codigoBarras: info.codigoBarras,
+    vencimento: new Date(info.vencimento),
+    valor: Number(info.valor),
+    tipo: Tipo.NUBANK,
+    sendAt: new Date(Number(currentMessage.internalDate)),
+    meta: {},
+  };
 }
 
 /**
@@ -222,9 +254,10 @@ export async function listC6(auth: OAuth2Client) {
   }));
 }
 
+type TParserReplace = [string | RegExp, string][];
 interface IParsers {
   parser: string | ((t: string) => boolean);
-  replaces?: [string, string][];
+  replaces?: TParserReplace;
   fieldName: string;
   indexIncrement?: number;
 }
@@ -251,7 +284,7 @@ function parseInfoFromText(text: string[], parsers: IParsers[]) {
   }).reduce((prev, current) => ({ ...prev, ...current }), {});
 }
 
-function isNotUndefined<T>(item: T | undefined): item is T {
+function isNotUndefined<T>(item: T | undefined | null): item is T {
   return Boolean(item);
 }
 

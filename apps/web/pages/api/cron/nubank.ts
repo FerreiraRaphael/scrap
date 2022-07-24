@@ -1,9 +1,8 @@
 // Next.js API route support: https://nextjs.org/docs/api-routes/introduction
 import { Boleto, Tipo } from '@prisma/client';
 import type { NextApiRequest, NextApiResponse } from 'next'
-import { format } from 'date-fns';
 import { prisma } from '~/server/globals/prisma';
-import { getBoletoNet } from '~/server/lib/gmail/gmail';
+import { getBoletoNubank } from '~/server/lib/gmail/gmail';
 import { middleware, WithCtx } from './_middlaware';
 
 export default async function handler(
@@ -19,12 +18,15 @@ export default async function handler(
       orderBy: [{ sendAt: 'asc' }],
       take: 1,
       where: {
-        tipo: Tipo.NET,
+        tipo: Tipo.NUBANK,
       }
     });
-    const boletos = await getBoletoNet(req.ctx.gmail, lastBoleto?.sendAt);
-    await prisma.boleto.createMany({
-      data: boletos,
+    const boleto = await getBoletoNubank(req.ctx.gmail, lastBoleto?.sendAt);
+    if (!boleto) {
+      return res.status(404).json([]);;
+    }
+    await prisma.boleto.create({
+      data: boleto,
     });
     const boletosData = await prisma.boleto.findMany();
     res.status(200).json((boletosData));

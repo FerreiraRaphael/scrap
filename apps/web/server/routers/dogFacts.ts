@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createRouter } from '~/server/createRouter';
+import { prisma } from '../globals/prisma';
 
 interface DogFactApiResponse {
   facts: string[];
@@ -19,5 +20,9 @@ export const dogFactsRouter = createRouter().query('get-random-fact', {
     }
     const resposne = await fetch(url.toString());
     return (await resposne.json()) as DogFactApiResponse;
+  },
+}).query('boleto', {
+  resolve: async () => {
+    return prisma.boleto.findMany();
   },
 });
