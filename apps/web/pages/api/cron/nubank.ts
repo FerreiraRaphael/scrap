@@ -21,12 +21,9 @@ export default async function handler(
         tipo: Tipo.NUBANK,
       }
     });
-    const boleto = await getBoletoNubank(req.ctx.gmail, lastBoleto?.sendAt);
-    if (!boleto) {
-      return res.status(404).json([]);;
-    }
-    await prisma.boleto.create({
-      data: boleto,
+    const boletos = await getBoletoNubank(req.ctx.gmail, lastBoleto?.sendAt);
+    await prisma.boleto.createMany({
+      data: boletos,
     });
     const boletosData = await prisma.boleto.findMany();
     res.status(200).json((boletosData));

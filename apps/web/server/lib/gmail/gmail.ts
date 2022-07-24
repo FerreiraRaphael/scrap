@@ -5,18 +5,19 @@ import { extractPdfText } from '../pdf/extractPdfText';
 import { extractImgFromPdf } from '../pdf/extractImgFromPdf';
 import { extractTextFromImg } from '../pdf/extractTextFromImg';
 import { OAuth2Client } from 'google-auth-library';
-import { googleOAuth } from '~/server/globals/googleOAuth';
-import { Boleto, Tipo, Prisma } from '@prisma/client';
-import { format } from 'date-fns';
+import { Boleto, Tipo } from '@prisma/client';
+import { format, isDate } from 'date-fns';
 
-type IBoletoInfo<
+type TBoletoFields = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt'>;
+
+type TBoletoInfo<
   T extends Boleto['tipo'],
   M extends (Object) = {}
-  > = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt'> & {
+  > = TBoletoFields & {
     tipo: T;
     meta: M;
   };
-type TBoletoNet = IBoletoInfo<'NET', {
+type TBoletoNet = TBoletoInfo<'NET', {
   codigoClient: string
 }>;
 
@@ -115,7 +116,7 @@ export async function listAluguel(auth: OAuth2Client) {
   }
 }
 
-type TBoletoCond = IBoletoInfo<'COND'>;
+type TBoletoCond = TBoletoInfo<'COND'>;
 export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoCond[]> {
   const messages = await getEmails(gmail, `from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO ${dateFilter(lastDate)}`);
   const boletos = await Promise.all(messages.map(async message => {
@@ -151,50 +152,50 @@ export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Pro
       return null
     }
   }));
-  return boletos.filter(isNotUndefined)
+  return boletos.filter(isNotUndefined).filter(isValidBoleto)
 }
 
-type TBoletoNubank = IBoletoInfo<'NUBANK'>;
-export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank | undefined> {
+type TBoletoNubank = TBoletoInfo<'NUBANK'>;
+export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank[]> {
   const messages = await getEmails(gmail, `from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada ${dateFilter(lastDate)}`);
-  if (messages.length === 0) {
-    console.warn('listNubank no messages')
-    return;
-  }
-  debugger;
-  const currentMessage = (getNewestMessage(messages))!;
-  const pdfData = await getEmailPdf(gmail, currentMessage);
-  console.debug('pdfdata ok', pdfData);
-  const images = await extractImgFromPdf(pdfData!);
-  console.debug('images ok', images);
-  const lastImage = images[images.length - 1];
-  const pdfText = await extractTextFromImg(lastImage);
-  console.debug('pdftext ok', pdfText);
-  const textLines = pdfText.split('\n');
-  const codeMatch = 'NV 260-7 ';
-  const vencimentoMatch = 'Em qualquer banco até o vencimento ';
-  const valorMatch = '00 R$ ';
-  const info = parseInfoFromText(textLines, [{
-    parser: (t) => t.includes(codeMatch),
-    replaces: [[codeMatch, ''], ...codigoBarrasReplaces],
-    fieldName: 'codigoBarras',
-  }, {
-    parser: (t) => t.includes(vencimentoMatch),
-    replaces: [[vencimentoMatch, '']],
-    fieldName: 'vencimento',
-  }, {
-    parser: (t) => t.includes(valorMatch),
-    replaces: [[valorMatch, ''], ...valorReplaces],
-    fieldName: 'valor',
-  }]);
-  return {
-    codigoBarras: info.codigoBarras,
-    vencimento: new Date(info.vencimento),
-    valor: Number(info.valor),
-    tipo: Tipo.NUBANK,
-    sendAt: new Date(Number(currentMessage.internalDate)),
-    meta: {},
-  };
+  const boletos = await Promise.all(messages.map(async (message) => {
+    try {
+      const pdfData = await getEmailPdf(gmail, message);
+      const images = await extractImgFromPdf(pdfData!);
+      const lastImage = images[images.length - 1];
+      const pdfText = await extractTextFromImg(lastImage);
+      const textLines = pdfText.replace(/[\r]/g, '').split('\n');
+      const codeMatch = '260-7';
+      const vencimentoMatch = 'Data de Vencimento';
+      const valorMatch = 'Valor Cobrado';
+      const info = parseInfoFromText(textLines, [{
+        parser: codeMatch,
+        replaces: codigoBarrasReplaces,
+        fieldName: 'codigoBarras',
+        indexIncrement: 1,
+      }, {
+        parser: vencimentoMatch,
+        fieldName: 'vencimento',
+        indexIncrement: 1,
+      }, {
+        parser: valorMatch,
+        replaces: valorReplaces,
+        fieldName: 'valor',
+        indexIncrement: 1,
+      }]);
+      return {
+        codigoBarras: info.codigoBarras,
+        vencimento: new Date(info.vencimento),
+        valor: Number(info.valor),
+        tipo: Tipo.NUBANK,
+        sendAt: new Date(Number(message.internalDate)),
+        meta: {},
+      };
+    } catch (e) {
+      return null;
+    }
+  }))
+  return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
 
 /**
@@ -289,6 +290,22 @@ function parseInfoFromText(text: string[], parsers: IParsers[]) {
 
 function isNotUndefined<T>(item: T | undefined | null): item is T {
   return Boolean(item);
+}
+
+function isValidBoleto<T extends TBoletoFields>({ codigoBarras, vencimento, valor }: T) {
+  const isCodigoLength = codigoBarras.length === 48 || codigoBarras.length === 47;
+  const isCodigoOnlyNumber = /^[0-9]+$/.test(codigoBarras);
+  const isValidCodigo = isCodigoLength && isCodigoOnlyNumber;
+  if (!isValidCodigo) {
+    return false;
+  }
+  if (!isDate(vencimento)) {
+    return false;
+  }
+  if (isNaN(valor)) {
+    return false;
+  }
+  return true;
 }
 
 async function getEmails(gmail: gmail_v1.Gmail, query: string) {
