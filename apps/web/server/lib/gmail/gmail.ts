@@ -164,9 +164,12 @@ export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): P
   debugger;
   const currentMessage = (getNewestMessage(messages))!;
   const pdfData = await getEmailPdf(gmail, currentMessage);
+  console.debug('pdfdata ok', pdfData);
   const images = await extractImgFromPdf(pdfData!);
+  console.debug('images ok', images);
   const lastImage = images[images.length - 1];
   const pdfText = await extractTextFromImg(lastImage);
+  console.debug('pdftext ok', pdfText);
   const textLines = pdfText.split('\n');
   const codeMatch = 'NV 260-7 ';
   const vencimentoMatch = 'Em qualquer banco até o vencimento ';
