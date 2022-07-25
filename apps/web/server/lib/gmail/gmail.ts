@@ -252,8 +252,8 @@ export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): P
 }
 
 type TBoletoEnergia = TBoletoInfo<'ENERGIA'>;
-export async function listEnergia(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoEnergia[]> {
-  const messages = await getEmails(gmail, 'from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica newer_than:6m');
+export async function getBoletosEnergia(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoEnergia[]> {
+  const messages = await getEmails(gmail, `from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica ${dateFilter(lastDate)}`);
   const boletos = await Promise.all(messages.map(async (message) => {
     try {
       const pdfBuffer = await getEmailPdf(gmail, message);

@@ -2,7 +2,7 @@
 import { Boleto, Tipo } from '@prisma/client';
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { prisma } from '~/server/globals/prisma';
-import { getBoletosC6, listEnergia } from '~/server/lib/gmail/gmail';
+import { getBoletosEnergia } from '~/server/lib/gmail/gmail';
 import { middleware, WithCtx } from './_middlaware';
 
 export default async function handler(
@@ -21,7 +21,7 @@ export default async function handler(
         tipo: Tipo.ENERGIA,
       }
     });
-    const boletos = await listEnergia(req.ctx.gmail, lastBoleto?.sendAt);
+    const boletos = await getBoletosEnergia(req.ctx.gmail, lastBoleto?.sendAt);
     await prisma.boleto.createMany({
       data: boletos,
     });
