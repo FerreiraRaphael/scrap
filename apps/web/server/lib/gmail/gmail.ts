@@ -251,32 +251,45 @@ export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): P
   return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
 
-export async function listEnergia(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
+type TBoletoEnergia = TBoletoInfo<'ENERGIA'>;
+export async function listEnergia(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoEnergia[]> {
   const messages = await getEmails(gmail, 'from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica newer_than:6m');
-  if (messages.length !== 0) {
-    console.warn('listEnergia no messages')
-    return;
-  }
-  await Promise.all(messages.map(async (message) => {
-    const pdfBuffer = await getEmailPdf(gmail, message);
-    const pdfText = await extractPdfText(pdfBuffer!);
-    const info = parseInfoFromText(pdfText, [{
-      parser: 'VENCIMENTO',
-      fieldName: 'vencimento',
-      indexIncrement: 1,
-    }, {
-      parser: 'VALOR ATÉ O VENCIMENTO',
-      fieldName: 'valor',
-      replaces: [['R$ ', '']],
-      indexIncrement: 1,
-    }, {
-      parser: 'GBCELESC1 (V1.05)',
-      fieldName: 'codigo',
-      indexIncrement: -1,
-    }]);
-    console.log(info);
+  const boletos = await Promise.all(messages.map(async (message) => {
+    try {
+      const pdfBuffer = await getEmailPdf(gmail, message);
+      const pdfText = await extractPdfText(pdfBuffer!);
+      const info = parseInfoFromText(pdfText, [{
+        parser: 'VENCIMENTO',
+        fieldName: 'vencimento',
+        indexIncrement: 1,
+      }, {
+        parser: 'VALOR ATÉ O VENCIMENTO',
+        fieldName: 'valor',
+        replaces: [['R$ ', ''], ...valorReplaces],
+        indexIncrement: 1,
+      }, {
+        parser: 'GBCELESC1 (V1.05)',
+        fieldName: 'codigoBarras',
+        indexIncrement: -1,
+        replaces: codigoBarrasReplaces
+      }]);
+      const vencimento = brStringDateToDate(info.vencimento);
+      if (!vencimento) {
+        return null;
+      }
+      return {
+        codigoBarras: info.codigoBarras,
+        vencimento,
+        valor: Number(info.valor),
+        tipo: Tipo.ENERGIA,
+        sendAt: new Date(Number(message.internalDate)),
+        meta: {},
+      };
+    } catch (e) {
+      return null;
+    }
   }));
+  return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
 
 type TParserReplace = [string | RegExp, string][];
