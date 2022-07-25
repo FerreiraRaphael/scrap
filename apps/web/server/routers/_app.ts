@@ -3,7 +3,7 @@
  */
 import { createRouter } from '../createRouter';
 import superjson from 'superjson';
-import { dogFactsRouter } from './dogFacts';
+import { boletosRouter } from './boletos';
 
 /**
  * Create your application's root router
@@ -33,6 +33,6 @@ export const appRouter = createRouter()
   /**
    * Merge `postRouter` under `post.`
    */
-  .merge('dogFacts.', dogFactsRouter);
+  .merge('boleto.', boletosRouter);
 
 export type AppRouter = typeof appRouter;

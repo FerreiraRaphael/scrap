@@ -8,7 +8,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { Boleto, Tipo } from '@prisma/client';
 import { format, isDate } from 'date-fns';
 
-type TBoletoFields = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt'>;
+type TBoletoFields = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt' | 'paidAt'>;
 
 type TBoletoInfo<
   T extends Boleto['tipo'],
