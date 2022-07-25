@@ -73,11 +73,7 @@ export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
 
   return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
-/**
- * @TODO: testar com boletos validos no email... e passar para padrao dos parsers
- */
-//financeiro2@santailha.com.br
-// começa dia 1-3 e vai até dia 7-9... complexo, tal
+
 export async function listAluguel(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const { data: { messages } } = await gmail.users.messages.list({
@@ -166,6 +162,48 @@ export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Pro
   return boletos.filter(isNotUndefined).filter(isValidBoleto)
 }
 
+type TBoletoC6 = TBoletoInfo<'C6'>;
+export async function getBoletosC6(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoC6[]> {
+  const messages = await getEmails(gmail, `from:no-reply@c6.com.br subject:Sua fatura do C6 Bank chegou ${dateFilter(lastDate)}`);
+  const boletos = await Promise.all(messages.map(async (message) => {
+    try {
+      const pdfBuffer = await getEmailPdf(gmail, message);
+      const pdfText = await extractPdfText(pdfBuffer!, '012108');
+      debugger
+      const info = parseInfoFromText(pdfText, [{
+        parser: 'VENCIMENTO',
+        fieldName: 'vencimento',
+        indexIncrement: 3,
+      }, {
+        parser: 'VALOR TOTAL',
+        fieldName: 'valor',
+        indexIncrement: 1,
+        replaces: valorReplaces,
+      }, {
+        parser: '(=) VALOR PAGO',
+        fieldName: 'codigoBarras',
+        indexIncrement: 1,
+        replaces: codigoBarrasReplaces,
+      }]);
+      const vencimento = brStringDateToDate(info.vencimento);
+      if (!vencimento) {
+        return null;
+      }
+      return {
+        codigoBarras: info.codigoBarras,
+        vencimento,
+        valor: Number(info.valor),
+        tipo: Tipo.C6,
+        sendAt: new Date(Number(message.internalDate)),
+        meta: {},
+      };
+    } catch(e) {
+      return null;
+    }
+  }));
+  return boletos.filter(isNotUndefined).filter(isValidBoleto);
+}
+
 type TBoletoNubank = TBoletoInfo<'NUBANK'>;
 export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank[]> {
   const messages = await getEmails(gmail, `from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada ${dateFilter(lastDate)}`);
@@ -213,10 +251,6 @@ export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): P
   return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
 
-/**
- *
- * @param {import('googleapis').oauth2_v1.Oauth2} auth
- */
 export async function listEnergia(auth: OAuth2Client) {
   const gmail = google.gmail({ version: 'v1', auth });
   const messages = await getEmails(gmail, 'from:celesc-fatura@celesc.com.br subject:Chegou a sua Fatura de Energia Eletrica newer_than:6m');
@@ -240,34 +274,6 @@ export async function listEnergia(auth: OAuth2Client) {
       parser: 'GBCELESC1 (V1.05)',
       fieldName: 'codigo',
       indexIncrement: -1,
-    }]);
-    console.log(info);
-  }));
-}
-
-export async function listC6(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
-  const messages = await getEmails(gmail, 'from:no-reply@c6.com.br subject:Sua fatura do C6 Bank chegou newer_than:6m ');
-  if (messages.length !== 0) {
-    console.warn('listC6 no messages')
-    return;
-  }
-  await Promise.all(messages.map(async (message) => {
-    const pdfBuffer = await getEmailPdf(gmail, message);
-    const pdfText = await extractPdfText(pdfBuffer!, '012108');
-    fs.writeFileSync(new Date().toISOString(), pdfText.join('\n'));
-    const info = parseInfoFromText(pdfText, [{
-      parser: 'VENCIMENTO',
-      fieldName: 'vencimento',
-      indexIncrement: 3,
-    }, {
-      parser: 'VALOR TOTAL',
-      fieldName: 'valor',
-      indexIncrement: 1,
-    }, {
-      parser: '(=) VALOR PAGO',
-      fieldName: 'codigo',
-      indexIncrement: 1,
     }]);
     console.log(info);
   }));
@@ -308,8 +314,8 @@ function isNotUndefined<T>(item: T | undefined | null): item is T {
 }
 
 function isValidBoleto<T extends TBoletoFields>({ codigoBarras, vencimento, valor }: T) {
-  const isCodigoLength = codigoBarras.length === 48 || codigoBarras.length === 47;
-  const isCodigoOnlyNumber = /^[0-9]+$/.test(codigoBarras);
+  const isCodigoLength = codigoBarras?.length === 48 || codigoBarras?.length === 47;
+  const isCodigoOnlyNumber = /^[0-9]+$/.test(codigoBarras || '');
   const isValidCodigo = isCodigoLength && isCodigoOnlyNumber;
   if (!isValidCodigo) {
     return false;
