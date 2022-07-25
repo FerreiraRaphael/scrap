@@ -18,7 +18,7 @@ type TBoletoInfo<
     meta: M;
   };
 type TBoletoNet = TBoletoInfo<'NET', {
-  codigoClient: string
+  codigoCliente: string
 }>;
 
 const valorReplaces: TParserReplace = [['.', ''], [',', '.']];
@@ -33,7 +33,7 @@ export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
     console.log(e);
     throw e;
   }
-  return await Promise.all(messages.map(async (message) => {
+  const boletos = await Promise.all(messages.map(async (message) => {
     const htmlLines = getHtmlContent(message);
     const info = parseInfoFromText(htmlLines, [{
       parser: 'CC3digo do cliente:<BR>',
@@ -54,17 +54,24 @@ export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
       fieldName: 'valor',
       replaces: valorReplaces,
     }]);
+    const vencimento = brStringDateToDate(info.vencimento);
+    if (!vencimento) {
+      return null;
+    }
+    debugger;
     return {
       codigoBarras: info.codigoBarras,
-      vencimento: new Date(info.vencimento),
+      vencimento,
       valor: Number(info.valor),
       meta: {
-        codigoClient: info.codigoClient,
+        codigoCliente: info.codigoCliente,
       },
       tipo: Tipo.NET,
       sendAt: new Date(Number(message.internalDate)),
     };
   }));
+
+  return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
 /**
  * @TODO: testar com boletos validos no email... e passar para padrao dos parsers
@@ -139,9 +146,13 @@ export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Pro
         fieldName: 'valor',
         replaces: valorReplaces,
       }]);
+      const vencimento = brStringDateToDate(info.vencimento);
+      if (!vencimento) {
+        return null;
+      }
       return {
         codigoBarras: info.codigoBarras,
-        vencimento: new Date(info.vencimento),
+        vencimento,
         valor: Number(info.valor),
         tipo: Tipo.COND,
         sendAt: new Date(Number(message.internalDate)),
@@ -183,9 +194,13 @@ export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): P
         fieldName: 'valor',
         indexIncrement: 1,
       }]);
+      const vencimento = brStringDateToDate(info.vencimento);
+      if (!vencimento) {
+        return null;
+      }
       return {
         codigoBarras: info.codigoBarras,
-        vencimento: new Date(info.vencimento),
+        vencimento,
         valor: Number(info.valor),
         tipo: Tipo.NUBANK,
         sendAt: new Date(Number(message.internalDate)),
@@ -394,4 +409,16 @@ function getHtmlContent(message: gmail_v1.Schema$Message) {
 
 function getHtmlAttachment(message: gmail_v1.Schema$Message) {
   return message?.payload?.parts?.find((p) => p.mimeType === 'text/html');
+}
+
+function brStringDateToDate(dateString: string): Date | undefined {
+  const [day, month, year] = dateString.split("/");
+  const dayN = +day;
+  const monthN = +month;
+  const yearN = +year;
+  if (isNaN(+day) || isNaN(+month) || isNaN(+year)) {
+    return;
+  }
+  const dateObject = new Date(yearN, monthN - 1, dayN);
+  return dateObject;
 }
