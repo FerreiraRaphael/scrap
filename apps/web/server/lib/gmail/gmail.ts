@@ -58,7 +58,6 @@ export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
     if (!vencimento) {
       return null;
     }
-    debugger;
     return {
       codigoBarras: info.codigoBarras,
       vencimento,
@@ -169,7 +168,6 @@ export async function getBoletosC6(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
     try {
       const pdfBuffer = await getEmailPdf(gmail, message);
       const pdfText = await extractPdfText(pdfBuffer!, '012108');
-      debugger
       const info = parseInfoFromText(pdfText, [{
         parser: 'VENCIMENTO',
         fieldName: 'vencimento',
