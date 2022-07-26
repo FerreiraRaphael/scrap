@@ -11,7 +11,7 @@ export const DefaultLayout = ({ children }: DefaultLayoutProps) => {
         <title>Scrap</title>
       </Head>
 
-      <main className="text-3xl font-bold underline">{children}</main>
+      <main>{children}</main>
 
       {process.env.NODE_ENV !== 'production' && (
         <ReactQueryDevtools initialIsOpen={false} />

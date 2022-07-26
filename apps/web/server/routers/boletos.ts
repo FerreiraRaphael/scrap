@@ -6,14 +6,11 @@ import { prisma } from '~/server/globals/prisma';
 export const boletosRouter = createRouter()
   .query('get-not-paid', {
     resolve: async () => {
-      const boletos = await prisma.boleto.findMany({
+    const boletos = await prisma.boleto.findMany({
         where: {
-          paidAt: undefined,
+          paidAt: null,
         },
-        orderBy: {
-          vencimento: 'asc',
-          tipo: 'asc',
-        }
+        orderBy: [{ vencimento: 'desc' }, { tipo: 'desc' }]
       })
       return boletos;
     },
@@ -34,6 +31,9 @@ export const boletosRouter = createRouter()
           code: 'NOT_FOUND',
           message: 'boleto not found',
         });
+      }
+      if (boleto.paidAt) {
+        return boleto;
       }
       return prisma.boleto.update({
         where: { id },

@@ -9,6 +9,7 @@ import { ReactElement, ReactNode } from 'react';
 import superjson from 'superjson';
 import { SSRContext } from '~/client/trpc';
 import { DefaultLayout } from '~/components/DefaultLayout';
+import '~/styles/globals.css';
 
 export type NextPageWithLayout = NextPage & {
   getLayout?: (page: ReactElement) => ReactNode;
