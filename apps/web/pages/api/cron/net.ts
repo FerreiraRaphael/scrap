@@ -16,7 +16,7 @@ export default async function handler(
       throw new Error('No google instance');
     }
     const [lastBoleto] = await prisma.boleto.findMany({
-      orderBy: [{ sendAt: 'asc' }],
+      orderBy: [{ sendAt: 'desc' }],
       take: 1,
       where: {
         tipo: Tipo.NET,
@@ -26,7 +26,14 @@ export default async function handler(
     await prisma.boleto.createMany({
       data: boletos,
     });
-    const boletosData = await prisma.boleto.findMany();
+    const boletosData = await prisma.boleto.findMany({
+      where: {
+        tipo: Tipo.NET,
+        sendAt: {
+          gt: lastBoleto?.sendAt,
+        }
+      }
+    });
     res.status(200).json((boletosData));
   } catch (e) {
     console.log(e)

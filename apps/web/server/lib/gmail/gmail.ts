@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { gmail_v1, google } from 'googleapis';
 import { download } from '../pdf/download';
 import { extractPdfText } from '../pdf/extractPdfText';
@@ -6,7 +5,7 @@ import { extractImgFromPdf } from '../pdf/extractImgFromPdf';
 import { extractTextFromImg } from '../pdf/extractTextFromImg';
 import { OAuth2Client } from 'google-auth-library';
 import { Boleto, Tipo } from '@prisma/client';
-import { format, isDate } from 'date-fns';
+import { format, isDate, addDays } from 'date-fns';
 
 type TBoletoFields = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt' | 'paidAt'>;
 
@@ -23,7 +22,7 @@ type TBoletoNet = TBoletoInfo<'NET', {
 
 const valorReplaces: TParserReplace = [['.', ''], [',', '.']];
 const codigoBarrasReplaces: TParserReplace = [[/\.|\s/g, '']];
-const dateFilter = (date?: Date) => date ? `after:${format(date, 'mm/dd/yyyy')}` : 'newer_than:6m';
+const dateFilter = (date?: Date) => date ? `after:${format(addDays(date, 1), 'MM/dd/yyyy')}` : 'newer_than:6m';
 
 export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNet[]> {
   let messages;
@@ -205,6 +204,7 @@ export async function getBoletosC6(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
 type TBoletoNubank = TBoletoInfo<'NUBANK'>;
 export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank[]> {
   const messages = await getEmails(gmail, `from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada ${dateFilter(lastDate)}`);
+  debugger
   const boletos = await Promise.all(messages.map(async (message) => {
     try {
       const pdfData = await getEmailPdf(gmail, message);
