@@ -119,7 +119,7 @@ export async function listAluguel(auth: OAuth2Client) {
 
 type TBoletoCond = TBoletoInfo<'COND'>;
 export async function getBoletoCond(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoCond[]> {
-  const messages = await getEmails(gmail, `from:operacional39@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO ${dateFilter(lastDate)}`);
+  const messages = await getEmails(gmail, `from:@grupodsc.com.br subject:BOLETO DE CONDOMÍNIO - RECANTO DO RIBEIRÃO ${dateFilter(lastDate)}`);
   const boletos = await Promise.all(messages.map(async message => {
     try {
       const pdfBuffer = await getEmailPdf(gmail, message);
