@@ -1,20 +1,34 @@
 import { Boleto } from "@prisma/client";
 import { format } from "date-fns";
+import { createSSGHelpers } from '@trpc/react/ssg';
 import { trpc } from "~/client/trpc";
+import { appRouter } from "~/server/routers/_app";
+import superjson from 'superjson';
+import { useAutoAnimate } from '@formkit/auto-animate/react'
 
-export default function IndexPage() {
-  const { data, isLoading, isError } = trpc.useQuery(['boleto.get-not-paid']);
+export async function getServerSideProps() {
+  const ssg = await createSSGHelpers({
+    router: appRouter,
+    ctx: {},
+    transformer: superjson,
+  });
+  const boletos = await ssg.fetchQuery('boleto.get-not-paid');
+  const boletosJson = superjson.stringify(boletos);
+  return { props: { boletos: boletosJson } }
+}
+interface IIndexPageProps {
+  boletos: Boleto[]
+}
+export default function IndexPage({ boletos }: IIndexPageProps) {
+  const { data, isLoading, isError } = trpc.useQuery(['boleto.get-not-paid'], { initialData: boletos });
   if (isLoading) {
     return <div>Loading...</div>;
   }
   if (isError) {
     return <div>Error...</div>;
   }
-
   return (
-    <div>
-      <BoletoList boletos={data!} />
-    </div>
+    <BoletoList boletos={data!} />
   );
 };
 
@@ -22,7 +36,8 @@ interface IBoletoList {
   boletos: Boleto[];
 }
 function BoletoList({ boletos }: IBoletoList) {
-  return <ul>{boletos.map((boleto) => <BoletoItemWithPago boleto={boleto} key={boleto.id} />)}</ul>
+  const [parent] = useAutoAnimate<HTMLDivElement>();
+  return <div ref={parent} className="grid grid-cols-1 md:grid-cols-2 xl:md:grid-cols-3">{boletos.map((boleto) => <BoletoItemWithPago boleto={boleto} key={boleto.id} />)}</div>
 }
 
 interface IBoletoItem {
@@ -30,12 +45,12 @@ interface IBoletoItem {
   onPagoClick: (id: number) => void;
 }
 function BoletoItem({ boleto, onPagoClick }: IBoletoItem) {
-  return <li className="mt-4 p-4">
-    <div className="flex flex-col gap-4 border-red-100 rounded-md shadow p-4">
-      <text className="text-2xl">{boleto.tipo}</text>
+  return <div className="flex mt-4 p-4 items-center justify-center">
+    <div className="flex flex-1 flex-col gap-4 border-red-100 rounded-md shadow p-4 max-w-md">
+      <span className="text-2xl">{boleto.tipo}</span>
       <div className="flex gap-4 justify-between">
-        <text className="text-base">Valor: R${(boleto.valor)}</text>
-        <text className="text-base">Vencimento: {format(boleto.vencimento, 'dd/MM/yyyy')}</text>
+        <span className="text-base">Valor: R${(boleto.valor)}</span>
+        <span className="text-base">Vencimento: {format(boleto.vencimento, 'dd/MM/yyyy')}</span>
       </div>
       <button onClick={async () => {
         if (navigator) {
@@ -44,7 +59,7 @@ function BoletoItem({ boleto, onPagoClick }: IBoletoItem) {
       }} className="bg-green-300 rounded-md shadow p-1">Copiar código boleto</button>
       <button onClick={() => onPagoClick(boleto.id)} className="bg-green-300 rounded-md shadow p-1">Pago</button>
     </div>
-  </li>
+  </div>
 }
 
 type BoletoItemWithPago = Pick<IBoletoItem, 'boleto'>
