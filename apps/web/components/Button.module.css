@@ -1,0 +1,8 @@
+.Button {
+  @apply relative border-2 border-black bg-white p-1
+    after:absolute after:top-1 after:left-1 after:-z-[1] after:h-full after:w-full after:bg-black
+    after:transition-all after:duration-150
+    hover:after:-top-1 hover:after:-left-1
+    focus:outline-gray-50 focus:after:top-0 focus:after:left-0
+    active:bg-black active:text-white;
+}
