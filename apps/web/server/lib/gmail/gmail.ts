@@ -6,6 +6,7 @@ import { extractTextFromImg } from '../pdf/extractTextFromImg';
 import { OAuth2Client } from 'google-auth-library';
 import { Boleto, Tipo } from '@prisma/client';
 import { format, isDate, addDays } from 'date-fns';
+import { prisma } from '~/server/globals/prisma';
 
 type TBoletoFields = Omit<Boleto, 'id' | 'createdAt' | 'updatedAt' | 'paidAt'>;
 
@@ -71,50 +72,85 @@ export async function getBoletoNet(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
 
   return boletos.filter(isNotUndefined).filter(isValidBoleto);
 }
-
-export async function listAluguel(auth: OAuth2Client) {
-  const gmail = google.gmail({ version: 'v1', auth });
-  const { data: { messages } } = await gmail.users.messages.list({
-    userId: 'me',
-    q: 'from:financeiro2@santailha.com.br subject:Seu Boleto de Aluguel newer_than:1m',
-  });
-
-  if (messages?.length) {
-    console.log('Messages', messages);
-    await Promise.all(messages.map(async message => {
-      try {
-        const { data } = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-        });
-        const { payload } = data;
-        const contentData = payload?.parts?.at(1)?.body?.data;
-        if (!contentData) {
-          return;
-        }
-        const content = Buffer.from(contentData, 'base64').toString('utf-8');
-        const contentWithoutBreaks = content.replace(/(\r\n|\n|\r)/gm, "");
-        const urls = contentWithoutBreaks.match(/(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/g);
-        const pdfUrl = (urls || []).find((url) => url.includes('https://adm000260.superlogica.net/clients/areadocliente/publico/cobranca/'));
-        if (!pdfUrl) return;
-        const buffer = await download(pdfUrl);
-        const pdfText = await extractPdfText(buffer);
-        const codeIndex = pdfText.indexOf('748-X');
-        const codigoDeBarras = pdfText[codeIndex + 1];
-        const vencimento = pdfText[codeIndex + 6];
-        const valor = pdfText[codeIndex - 4];
-        console.log(
-          codigoDeBarras,
-          vencimento,
-          valor,
-        );
-      } catch (e) {
-        console.log('fail in', message.snippet);
-      }
-    }))
-  } else {
-    console.log('No messages.');
+type TBoletoAluguel = TBoletoInfo<'ALUGUEL'>;
+export async function getBoletoAluguel(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoAluguel[]> {
+  let messages;
+  try {
+    messages = await getEmails(gmail, `from:@santailha.com.br subject:Seu Boleto de Aluguel ${dateFilter(lastDate)}`);
+  } catch (e) {
+    console.log(e);
+    throw e;
   }
+  const boletos = await Promise.all(messages.map(async message => {
+    try {
+      const htmlLines = getHtmlContent(message);
+      const urlLine = (htmlLines).find((line) => line.includes('https://adm000260.superlogica.net/clients/areadocliente/publico/cobranca/'));
+      const matchResult = urlLine?.match(/(http|ftp|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/g);
+      const [pdfUrl] = matchResult || [];
+      if (!pdfUrl) return;
+      const buffer = await download(pdfUrl);
+      const pdfText = await extractPdfText(buffer);
+      const parser = '748-X';
+      const info = parseInfoFromText(pdfText, [{
+        parser,
+        indexIncrement: 1,
+        fieldName: 'codigoBarras',
+        replaces: codigoBarrasReplaces,
+      }, {
+        parser,
+        indexIncrement: 6,
+        fieldName: 'vencimento',
+      }, {
+        parser,
+        indexIncrement: -4,
+        fieldName: 'valor',
+        replaces: valorReplaces,
+      }]);
+      const vencimento = brStringDateToDate(info.vencimento);
+      if (!vencimento) {
+        return null;
+      }
+      const boletoInfo = {
+        codigoBarras: info.codigoBarras,
+        vencimento,
+        valor: Number(info.valor),
+        tipo: Tipo.ALUGUEL,
+        sendAt: new Date(Number(message.internalDate)),
+        meta: {},
+      };
+      const isDuplicated = await resolvedDuplicatedAluguel(boletoInfo);
+      if (isDuplicated) {
+        return null;
+      }
+      return boletoInfo;
+    } catch (e) {
+      return null;
+    }
+  }))
+  return boletos.filter(isNotUndefined).filter(isValidBoleto)
+};
+
+async function resolvedDuplicatedAluguel(boleto: TBoletoAluguel) {
+  const existingBoleto = await prisma.boleto.findUnique({
+    where: {
+      codigoBarras_tipo: {
+        codigoBarras: boleto.codigoBarras,
+        tipo: boleto.tipo,
+      }
+    }
+  });
+  if (existingBoleto) {
+    await prisma.boleto.update({
+      data: {
+        sendAt: boleto.sendAt,
+      },
+      where: {
+        id: existingBoleto.id,
+      }
+    });
+    return true;
+  }
+  return false;
 }
 
 type TBoletoCond = TBoletoInfo<'COND'>;
@@ -194,7 +230,7 @@ export async function getBoletosC6(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
         sendAt: new Date(Number(message.internalDate)),
         meta: {},
       };
-    } catch(e) {
+    } catch (e) {
       return null;
     }
   }));
@@ -204,7 +240,6 @@ export async function getBoletosC6(gmail: gmail_v1.Gmail, lastDate?: Date): Prom
 type TBoletoNubank = TBoletoInfo<'NUBANK'>;
 export async function getBoletoNubank(gmail: gmail_v1.Gmail, lastDate?: Date): Promise<TBoletoNubank[]> {
   const messages = await getEmails(gmail, `from:todomundo@nubank.com.br subject:A fatura do seu cartão Nubank está fechada ${dateFilter(lastDate)}`);
-  debugger
   const boletos = await Promise.all(messages.map(async (message) => {
     try {
       const pdfData = await getEmailPdf(gmail, message);
