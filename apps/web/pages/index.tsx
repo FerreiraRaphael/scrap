@@ -21,7 +21,10 @@ interface IIndexPageProps {
   boletos: Boleto[]
 }
 export default function IndexPage({ boletos }: IIndexPageProps) {
-  const { data, isLoading, isError } = trpc.useQuery(['boleto.get-not-paid'], { initialData: boletos });
+  const { data, isLoading, isError } = trpc.useQuery(['boleto.get-not-paid'], {
+    initialData: boletos,
+    refetchOnMount: false,
+  });
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -52,7 +55,7 @@ function BoletoItem({ boleto, onPagoClick }: IBoletoItem) {
     <div className="BoletoItem">
       <span className="text-2xl font-bold">{boleto.tipo}</span>
       <div className="flex gap-4 justify-between">
-        <span className={`text-base`}>Valor: R${(boleto.valor)}</span>
+        <span className="text-base">Valor: R${(boleto.valor)}</span>
         <span className="text-base">Vencimento: {format(boleto.vencimento, 'dd/MM/yyyy')}</span>
       </div>
       <div className="flex justify-end gap-4">
@@ -67,8 +70,8 @@ function BoletoItem({ boleto, onPagoClick }: IBoletoItem) {
     <style jsx>{
       `
         .BoletoItem {
-          @apply flex flex-1 flex-col gap-4 border-black border-2 max-w-md relative p-4
-          shadow hover:shadow-xl transition-all duration-150
+          @apply flex flex-1 flex-col gap-4 border-2 max-w-md relative p-4
+          transition-all duration-150 rounded hover:selected-2;
         }
       `
     }

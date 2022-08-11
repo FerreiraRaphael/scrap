@@ -27,3 +27,9 @@ html {
   font-family: "ArgentumSans", sans-serif;
   font-weight: normal;
 }
+
+@layer base {
+  *, ::after, ::before{
+    @apply border-primary dark:border-secondary text-primary dark:text-secondary bg-secondary dark:bg-primary;
+  }
+}
